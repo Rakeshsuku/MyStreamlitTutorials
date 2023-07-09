@@ -1,4 +1,4 @@
-# Working with file uploads
+# Working with plots usings Plotly
 
 # Core packages
 import streamlit as st

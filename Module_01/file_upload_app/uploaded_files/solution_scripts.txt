@@ -1,0 +1,195 @@
+################################# Task 1 #################################
+
+# Create a Glue Database from CLI
+aws glue create-database --database-input "{\"Name\":\"covid-test-db\"}"
+
+# csv crawler
+aws glue create-crawler \
+--name covid-s3-crawler-csv \
+--role AWSGlueServiceRole-mlincub \
+--database-name covid-test-db \
+--targets "{\"S3Targets\": [\
+        {\
+            \"Path\": \"s3://covid-dataset-rakesh/ordered-data/dataset\",\
+            \"Exclusions\": [\"**.json\"] \
+        }\
+    ]}" \
+--recrawl-policy "{\"RecrawlBehavior\": \"CRAWL_NEW_FOLDERS_ONLY\"}" \
+--tags "{\"KeyName\": \"project\", \"Value\": \"mlincub\"}"
+
+# start csv crawler
+aws glue start-crawler --name covid-s3-crawler-csv
+
+# Issue query from athena to see sample records:
+
+SELECT * FROM "AwsDataCatalog"."covid-test-db"."states_current" limit 10;
+
+# Create crawler for JSON files:
+
+aws glue create-crawler \
+--name covid-s3-crawler-json \
+--role AWSGlueServiceRole-mlincub \
+--database-name covid-test-db \
+--targets "{\"S3Targets\": [\
+        {\
+            \"Path\": \"s3://covid-dataset-rakesh/ordered-data/dataset\",\
+            \"Exclusions\": [\"**.csv\"] \
+        }\
+    ]}" \
+--table-prefix json_ \
+--recrawl-policy "{\"RecrawlBehavior\": \"CRAWL_NEW_FOLDERS_ONLY\"}" \
+--tags "{\"KeyName\": \"project\", \"Value\": \"mlincub\"}" \
+--configuration "{\"Version\": 1.0, \"Grouping\": {\"TableLevelConfiguration\":5}}"
+
+# Run crawler for json files
+
+aws glue start-crawler --name covid-s3-crawler-json
+
+# Athena Queries
+SELECT * FROM "AwsDataCatalog"."covid-test-db"."json_states_current" limit 10;
+
+# Command to create custom json classifier (not working)
+
+aws glue create-classifier --json-classifier "{ \
+    \"Name\": \"MyJsonClassifier\", \
+    \"JsonPath\": \"$[*]\" \
+    }"
+
+# Create a new table to test custom json classifier
+
+aws glue create-database --database-input "{\"Name\":\"covid-test-db-new\"}"
+
+# Create json crawler with custom classifier
+
+aws glue create-crawler \
+--name covid-s3-crawler-json-cc \
+--role AWSGlueServiceRole-mlincub \
+--database-name covid-test-db-new \
+--targets "{\"S3Targets\": [\
+        {\
+            \"Path\": \"s3://covid-dataset-rakesh/ordered-data/dataset\",\
+            \"Exclusions\": [\"**.csv\"] \
+        }\
+    ]}" \
+--table-prefix json_ \
+--recrawl-policy "{\"RecrawlBehavior\": \"CRAWL_NEW_FOLDERS_ONLY\"}" \
+--tags "{\"KeyName\": \"project\", \"Value\": \"mlincub\"}" \
+--configuration "{\"Version\": 1.0, \"Grouping\": {\"TableLevelConfiguration\":5}}" \
+--classifiers MyJSONClassifier1
+
+# Run crawler for json files
+
+aws glue start-crawler --name covid-s3-crawler-json-cc
+
+
+# Athena Query (returns error)
+
+SELECT * FROM "AwsDataCatalog"."covid-test-db-new"."json_states_current" limit 10;
+
+
+################################# Task 2 #################################
+
+# Pull the Glue docker .0_image_01
+
+docker pull amazon/aws-glue-libs:glue_libs_4.0.0_image_01
+
+# Set up environment variables
+
+export AWS_PROFILE=default
+export AWS_DEFAULT_REGION=us-east-1
+export JUPYTER_WORKSPACE_LOCATION=/home/rakesh/Projects/ML_Incubator/glue_workspace
+
+# Run the glue docker image and open a Jupyter lab session to develop the ETL script.
+
+docker run -it -v ~/.aws:/home/glue_user/.aws \
+-v $JUPYTER_WORKSPACE_LOCATION:/home/glue_user/workspace/jupyter_workspace/ \
+-e AWS_PROFILE=$AWS_PROFILE -e DISABLE_SSL=true --rm -p 4040:4040 -p 18080:18080 \
+-p 8998:8998 -p 8888:8888 \
+--name glue_jupyter_lab amazon/aws-glue-libs:glue_libs_4.0.0_image_01 \
+/home/glue_user/jupyter/jupyter_start.sh
+
+
+# Create a new database for parquet files
+
+aws glue create-database --database-input "{\"Name\":\"covid_parquet_db\"}"
+
+# Create crawler
+
+aws glue create-crawler \
+--name covid-s3-crawler-parquet \
+--role AWSGlueServiceRole-mlincub \
+--database-name covid_parquet_db \
+--targets "{\"S3Targets\": [\
+        {\
+            \"Path\": \"s3://covid-dataset-rakesh/cleaned-data/\"\
+        }\
+    ]}" \
+--table-prefix par_ \
+--recrawl-policy "{\"RecrawlBehavior\": \"CRAWL_NEW_FOLDERS_ONLY\"}" \
+--tags "{\"KeyName\": \"project\", \"Value\": \"mlincub\"}" \
+--configuration "{\"Version\": 1.0, \"Grouping\": {\"TableLevelConfiguration\":3}}"
+
+# Run the crawler
+
+aws glue start-crawler --name covid-s3-crawler-parquet
+
+# Query the data from Athena
+
+# SELECT top 3 months with highest average covid positive cases
+
+SELECT YEAR(date) AS year, MONTH(date) AS month, ROUND(AVG(positive), 1) AS positive 
+FROM "AwsDataCatalog"."covid_parquet_db"."par_states_daily" 
+GROUP BY YEAR(date), MONTH(date) 
+ORDER BY positive DESC 
+LIMIT 3;
+
+
+# Select top 5 days with highest test positivity rate (by states)
+
+SELECT A.state, B.name, date, positiveTestsViral, totalTestsViral,
+       (CAST(positiveTestsViral AS REAL)/CAST(totalTestsViral AS REAL)) AS positivityRate
+FROM "AwsDataCatalog"."covid_parquet_db"."par_states_daily" AS A
+LEFT JOIN (SELECT DISTINCT state, name 
+           FROM "AwsDataCatalog"."covid_parquet_db"."par_states_info") AS B
+ON A.state = B.state
+WHERE totalTestsViral > 0
+ORDER BY positivityRate DESC 
+LIMIT 5;
+
+
+# Select top 5 states with highest monthly fatality rates. Consider only states with at-least 100 death in the month:
+
+SELECT A.state, YEAR(date) AS year, MONTH(date) AS month,
+       SUM(positiveIncrease) AS positive, SUM(deathIncrease) AS death,
+       (CAST(SUM(deathIncrease) AS REAL)/CAST(SUM(positiveIncrease) AS REAL)) AS fatalityRate
+FROM "AwsDataCatalog"."covid_parquet_db"."par_states_daily" AS A
+LEFT JOIN (SELECT DISTINCT state, name
+           FROM "AwsDataCatalog"."covid_parquet_db"."par_states_info") AS B
+ON A.state = B.state
+GROUP BY A.state, YEAR(date), MONTH(date) 
+HAVING SUM(positiveIncrease) > 0
+       AND SUM(deathIncrease) > 100
+ORDER BY fatalityRate DESC 
+LIMIT 5;
+
+
+############################################## Task 2 ####################################################
+
+# Clone github repository
+git clone https://github.com/Rakeshsuku/ML_Incubator_Project.git
+
+# Create a new branch and add solution files
+git checkout -b solutions
+
+# Add Solution files
+git add -A
+
+# Commit the solution files:
+git commit -m "added solution files"
+
+# Add new branch in online repo and push.
+git push --set-upstream origin solutions
+
+# See commit history:
+git log --oneline --decorate --graph --all
+
