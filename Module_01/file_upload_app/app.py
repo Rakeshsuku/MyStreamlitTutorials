@@ -7,7 +7,6 @@ import streamlit as st
 import numpy as np
 import pandas as pd
 from PIL import Image
-import pandas as pd
 import docx2txt
 from pathlib import Path
 
@@ -30,7 +29,7 @@ def save_uploaded_file(file_obj, dir_path=r"./uploaded_files/"):
     dir_path.mkdir(exist_ok=True)
     with open((dir_path / file_obj.name).as_posix(), "wb") as f:
         f.write(file_obj.getbuffer())
-    st.success("File {} saved successfully!".format(file_obj.name))
+    return st.success("File {} saved successfully!".format(file_obj.name))
 
 
 def main():
@@ -107,6 +106,24 @@ def main():
                 save_uploaded_file(doc_file)
     elif choice == "Upload Multiple Files":
         st.subheader("Upload Multiple Files")
+        uploaded_files = st.file_uploader(
+            "Upload multiple images:",
+            type=["png", "jpeg", "jpg"],
+            accept_multiple_files=True,
+        )
+        if st.button("Process"):
+            if uploaded_files is not None:
+                # st.write(uploaded_files) # Uploaded files appear as a list
+                for image_file in uploaded_files:
+                    file_details = {
+                        "filename": image_file.name,
+                        "filetype": image_file.type,
+                        "filesize": image_file.size,
+                    }
+                    st.write(file_details)
+                    st.image(load_image(image_file), width=750)
+                    # Saving image file:
+                    save_uploaded_file(image_file)
     else:
         st.subheader("About")
 
