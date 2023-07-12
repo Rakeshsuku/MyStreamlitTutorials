@@ -1,9 +1,12 @@
+# Plotting in Streamlit``
+
 # Core package
 import streamlit as st
 
 # Additional packages
-
-# Fileshares
+import numpy as np
+import matplotlib as mpl
+import matplotlib.pyplot as plt
 
 
 def main():

@@ -40,6 +40,7 @@ if prompt:
         with st.chat_message("assistant"):
             response = model.generate(prompt=prompt, top_k=1)
             st.write(response)
+            st.session_state.messages.append({"role": "assistant", "content": response})
         # with st.chat_message("Happy", avatar="🤗"):
         #     # avatar can be an image
         #     st.write("I am HuggingFace!")
